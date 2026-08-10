@@ -60,6 +60,13 @@ verify_password = lambda p, h: pwd.verify(p, h)  # to check login
 
 **Never** use MD5/SHA for passwords — they're fast enough to brute-force. This is a security rule, not a preference.
 
+**Why "hash + salt" and not "just hash":** a hash is one-way — easy to compute, infeasible to invert — so the DB holds `hash(password)` and a login attempt compares `hash(candidate)`. But "some fast hash" isn't enough:
+
+- **Fast hashes are brute-forceable.** MD5/SHA are fast *by purpose*, which makes them fast to *try*. bcrypt is **deliberately slow** (a work factor that repeatedly re-hashes — "key stretching"): one compare ~100ms, so guessing becomes thousands of times more expensive. That slowness *is* the security.
+- **Deterministic hashes are rainbow-table-able.** Same password → same hash → an attacker precomputes a table of common-password→hash. **Salt** (a random per-user value appended before hashing) makes identical passwords hash differently. The salt is *not secret* — bcrypt embeds it in the stored string (`$2b$cost$salt$hash`). Its job is uniqueness, not secrecy.
+
+> **Field note:** bcrypt only uses the first **72 bytes** of a password — longer ones are silently truncated. Cap password length in the schema (`max_length`) so truncation can't make a "different but accepted" password.
+
 ### 4.2 JWT: a signed claim
 
 A **JWT** is three base64 parts: `header.payload.signature`. The signature is a keyed hash (HMAC with our secret) of the first two parts — so if anyone tampers with the payload, the signature won't verify.
@@ -72,6 +79,17 @@ decoded = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
 ```
 
 **Why JWT instead of a "session row" in the DB?** Because verifying a JWT is *pure math* — any server in our fleet can trust it without asking the database. Trade-off: tokens can't be "revoked" server-side (until we add a denylist). For saved-portfolio auth, short-lived tokens are perfect.
+
+**What a JWT *is*, mechanically.** Three base64url segments joined by dots — `header.payload.signature`:
+
+- **header**: `{"alg": "HS256", "typ": "JWT"}` — which algorithm, what type.
+- **payload**: the claims, `{"sub": "bob", "exp": ts, "iat": ts}` — subject, expiry, issued-at.
+- **signature**: a *keyed hash of the first two segments* using the secret — `HMAC-SHA256(secret, "header.payload")`.
+
+Two properties you must internalize:
+
+1. **The payload is NOT encrypted.** Anyone who base64url-decodes it can *read* it. The signature only *authenticates* — if someone edits `sub` to "admin", the recomputed signature won't match, and the server rejects. This is integrity + origin, not secrecy.
+2. **`exp` is a timestamp, not a boolean.** The client doesn't "expire" a token; the server *checks* `exp` against the clock on every decode. The token carries its own death date. And because verification is stateless (no DB), a leaked token stays valid until `exp` — the *only* ways to kill it early are a denylist or short expiries + refresh tokens (the exercises).
 
 ### 4.3 Reading the token: `OAuth2PasswordBearer`
 
@@ -98,6 +116,10 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 ```
 
 Endpoints declare `user: User = Depends(get_current_user)` → FastAPI resolves the whole chain (header → decode → DB row) before your code runs. **401 = no/invalid creds; 403 = valid creds but not allowed** (we don't have 403 cases yet — Feature 7's ownership check introduces it).
+
+**What the protected-chain mechanism is:** `route declares Depends(get_current_user)` → FastAPI resolves `get_current_user` → which itself declares `Depends(oauth2_scheme)` → which either returns the token string or 401s → `get_current_user` decodes, verifies, loads the User → or 401s. **The endpoint only runs if the whole chain succeeds** — the guard sits at the door, and the endpoint can assume a valid user without writing a single auth check. Auth-as-a-dependency-chain, not auth-as-if-statements.
+
+**401 vs 403, precisely:** `401` = "I don't know who you are" (missing/expired/invalid token; the `WWW-Authenticate: Bearer` header is the invitation to send credentials). `403` = "I know who you are, and you're *not allowed*" (wrong owner). Note the login route returns 401 for *both* "no such user" and "wrong password" — deliberately. If it returned 404 vs 401, an attacker could probe *which usernames exist* by watching the code. Symmetric error messages prevent username enumeration.
 
 ---
 
@@ -298,6 +320,20 @@ The JWT round-trip is the entire story: **sign at login, verify per request.** N
 - [ ] `jwt_secret` not the default value in production (config, .env)?
 - [ ] 401 (no/bad token) vs 403 (forbidden owner) used correctly?
 - [ ] Token verification pure, DB fetch separate — testable in Feature 11?
+
+---
+
+### Field notes — silent failures to expect
+
+> **⚠️ `passlib[bcrypt]` and recent bcrypt emit a warning** ("error reading bcrypt version") — a known incompatibility between `passlib==1.7.4` and `bcrypt>=4.1`. Not fatal; either pin `bcrypt` < 4.1 or accept the warning (or drop `CryptContext` and use `bcrypt` directly).
+
+> **⚠️ Install `passlib[bcrypt]` *with* the extra, as written.** Plain `passlib` claims bcrypt support but shells out to a backend you didn't install — you get an import error at *first use*, not at install.
+
+> **⚠️ `OAuth2PasswordRequestForm` needs `python-multipart`.** FastAPI needs a form-parsing library to read `username`/`password` from `application/x-www-form-urlencoded`. Forget it → the `/docs` "Authorize" login 500s. The single most common "why is my login broken" cause.
+
+> **⚠️ Never commit a real `jwt_secret`.** The config default `"change-me-in-prod"` must be overridden by `.env`. A secret in git history has a long half-life — rotate, don't "remove later." (Feature 13 turns this silent risk into a loud startup failure.)
+
+> **📌 Tokens live in headers, never URLs.** `Authorization: Bearer ...` never goes in a URL (which browsers, histories, and proxy logs capture). That's why "never log full bodies" (F13) exists.
 
 ---
 

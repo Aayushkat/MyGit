@@ -50,6 +50,10 @@ val = await r.get(f"profile:{username}")   # None if expired/miss
 await r.incr("views:torvalds")             # atomic +1
 ```
 
+**Why is `INCR` atomic when SQLite's UPDATE wasn't?** The design detail most tutorials skip: **Redis is single-threaded.** Every command (`GET`, `SET`, `INCR`, `EXPIRE`) runs on one thread, one after another. Two clients' `INCR` on the same key can never execute *simultaneously* — command 1 finishes fully before command 2 starts. That serialization *is* the atomicity: "an operation that can't be observed mid-way by any other client." `INCR` is "read → add 1 → write," three steps that race on a multi-writer DB but can't on a one-thread server. No locks needed — serialization is built into the architecture.
+
+**TTL expiry isn't magic — it's checked lazily.** Redis doesn't delete the key "at exactly 900s." Keys expire on *access*: the next `GET` checks the stored time and returns nothing if it's past. (There's also a periodic passive cleanup pass to avoid memory leaks — but the *contract to you* is "expired = value missing.") That's why "never stored" and "just expired" are indistinguishable to a reader — which is *exactly right* for a cache: both mean "miss, go refetch."
+
 ### 4.2 Why a network cache is better than a file for hot data
 
 Compare:
@@ -71,12 +75,20 @@ if count > ALLOWED: → 429 + Retry-After
 
 Simple (but has a "burst boundary" issue — two batches at the exact edge can exceed the limit). A successor algorithm is the token bucket (drip rate). We start with fixed-window for the concept; the exercise upgrades to sliding/token-bucket.
 
+**Why each algorithm exists (pick by the *abuse shape* you fear):**
+
+- **Fixed window** (`INCR` + `EXPIRE 60`): the window resets on the *server clock*, not when the user started. 30 requests at second 59 of window A, then 30 at second 1 of window B = 60 requests in 2 consecutive seconds *around a window edge* — blowing a 30/min limit. That's the burst-boundary hole.
+- **Sliding window**: keep a log of recent request *timestamps* (a Redis **sorted set**: `ZADD` a scored member per request, `ZREMRANGEBYSCORE` to drop old ones, `ZCARD` to count). "How many in the last 60s *right now*" — no boundary hole. Cost: more commands, more memory.
+- **Token bucket**: a bucket holds up to `capacity` tokens; each request spends one; tokens refill at `rate`/second. An idle user has a full bucket (can burst immediately); the refill rate caps sustained load. Cost: you must store "current tokens + last refill time" and compute refill on read. A small **Lua script** keeps check-and-spend atomic (scripts run on Redis's single thread).
+
 ### 4.4 Dependency for rate limiting
 
 A **dependency** `Depends(rate_limit)` or a **middleware**? 
 - **Middleware** catches *every* request (simple, broad).
 - **Dependency** lets us protect only expensive endpoints (GitHub-touching ones).
 We use a **dependency** on the costly endpoints — precise, and reusable.
+
+**Why dependency over middleware?** A dependency only runs for endpoints that *declare* it; a middleware runs for **every** request, before routing. Rate-limiting in middleware would count `GET /` and `/docs` traffic in the same budget you're protecting for `/portfolio` — pointless. "Narrowest blast radius" — the same instinct as Feature 3's service layer and this feature's swap-proof repository.
 
 ---
 
@@ -99,6 +111,8 @@ app/
 | `rate_limit.py` | check a per-IP, per-endpoint window | protect GitHub budget |
 
 > **Key point:** the service **does not change**. Because Feature 4's refactor introduced a cache interface, we swap "SQLite store" → "Redis store" without touching orchestration. That *is* dependency inversion paying rent.
+
+**The mechanism of that swap:** in Feature 4 you defined the store as a `Protocol` — an *interface* — and the service depends on the *interface*, not the concrete SQLite repository. Now you rewrite the repository body, keeping the same `get_cached`/`save` signatures, and nothing downstream changes. The service holds a *name* of what it needs (`get_cached(username) -> dict | None`); any implementation satisfying the name plugs in. No `if self.using_redis:` branching. The point to *feel*: the seam was invented one feature early (F4), looking forward to F5 — build seams *before* you need the swap, so the swap is cheap when the need arrives.
 
 ---
 
@@ -237,6 +251,18 @@ Count the touching of GitHub in the HIT path: **zero.** And the rate-limiter *ne
 - [ ] Nothing about HTTP goes through GitHub for a cache HIT?
 - [ ] Is the rate limit applied ONLY to the expensive endpoint (not GET `/`)?
 - [ ] Could a Redis outage crash the app (should we degrade gracefully)?
+
+---
+
+### Field notes — silent failures to expect
+
+> **⚠️ `decode_responses=True` or you get `bytes`.** Without it, Redis returns `bytes`, not `str`, and `json.loads(b'{"a": 1}')` fails loudly. One flag fixes a surprising amount of debugging, and it's your first "the client library's defaults are not your product's defaults" lesson.
+
+> **⚠️ `request.client.host` can be a proxy.** Behind a reverse proxy or load balancer (Feature 12/13), every request may appear to come from the *proxy's* IP — all users share one source, so one user's over-limit 429s everyone. The real client IP is typically in `X-Forwarded-For` (set by the proxy). Trusting `client.host` blindly breaks exactly when you deploy.
+
+> **⚠️ Redis counters are RAM — they don't survive a restart.** For a cache/rate-limit that's usually *correct*; the moment you need durability, that's Feature 7's flush-to-DB job, or enabling persistence.
+
+> **📌 `INCR` returns the new value — use it.** `count = await r.incr(key)` gets the incremented count in the same round-trip; no separate `GET`. "Return-value APIs" everywhere, Redis included.
 
 ---
 

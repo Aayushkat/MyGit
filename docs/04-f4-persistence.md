@@ -59,6 +59,14 @@ torvalds          {...}           2026-08-06T12:00:00Z
 
 `username` as primary key is natural here: one cache row per user, and "get by username" is our only lookup.
 
+**What a database actually is, physically.** When you write `table=True`, a real file on disk gets structures that let the engine find rows fast. Three behaviors fall out of the mechanics:
+
+- **Rows live in pages inside a B-tree index.** "The table" and "the index on the primary key" are the *same* structure in SQLite — that's why primary-key lookups (`session.get`) are fast, and why adding an index on `username` in Feature 6 means "making another B-tree." A `WHERE username = ?` does a tree walk (O(log n)), not a scan.
+- **SQLite is a single file with a single writer.** One process writes at a time, under an exclusive lock (unless you enable WAL mode) — that's where "SQLite writes lock the DB" comes from. Many readers, one writer.
+- **Postgres (Feature 12) is a server, not a file** — it has many writers via MVCC (readers see a snapshot; writers don't block each other). This is *precisely* why the roadmap migrates: at production scale, the single-writer file model stops scaling.
+
+So you're not just "learning SQL" — you're learning "what a file-based single-writer B-tree does," then "what a server-based multi-writer database does." Both are databases; the difference is the concurrency model.
+
 ### 4.2 SQLModel: table = a class
 
 SQLModel lets one class be **both** a Pydantic schema and a DB table:
@@ -76,6 +84,11 @@ class ProfileCache(SQLModel, table=True):
 - `table=True` says "this is a real table, not just a schema."
 - `Field(primary_key=True)` makes `username` the unique key (upsert target).
 - Store the whole portfolio as **one JSON column** — simplest, and it's what a cache needs. (Normalizing every repo into its own table is over-engineering *for a cache*; we'd normalize if repos were the source of truth.)
+
+**SQLModel is two libraries wearing one coat.** It's a merge of SQLAlchemy and Pydantic. `ProfileCache` is *both* a Pydantic model and a SQLAlchemy table (`table=True` generates the `__table__` metadata from the type annotations and `Field` declarations). Two consequences follow from that dual nature:
+
+- `model_dump()` walks the Pydantic fields and serializes to a plain dict; `model_validate(data)` re-runs *validation* (defaults, type checks, coercion) and rebuilds a model. So a cached dict (from `json.loads`) becomes a `Portfolio` again in one call — validation, not just re-casting.
+- **`model_validate` raises if the dict has fields the model doesn't know** (unless `extra="ignore"`). Cache a snapshot under an *older* schema, deploy a model with *fewer* fields, and the cached row throws on read. That's `schema evolution` meeting `cache invalidation` — the "version-skew" problem. Worth naming now so it's not a mystery later.
 
 ### 4.3 Engine + Session (the connection pattern)
 
@@ -98,6 +111,14 @@ def get_session():
 - `check_same_thread=False` is a SQLite quirk: FastAPI may use threads; SQLite by default forbids cross-thread use.
 - `get_session` with `yield` = **FastAPI dependency**: enter → open session, exit → auto-closes. That's the "one session per request, always cleaned up" pattern.
 
+**Engine vs Session — the actual relationship.** These two get cargo-culted the hardest:
+- **Engine** ≈ a *pool of database connections*, created once per app. It doesn't talk to your code per request; it hands out connections.
+- **Session** ≈ a *transaction scope* — "one unit of work." It borrows a connection from the pool, tracks changes, commits, and returns the connection.
+
+The `yield` in `get_session` is the mechanism worth slowing down on: **code before the `yield` runs when the dependency is entered (once per request), the yielded session is injected into the endpoint, and code after the `yield` runs when the request ends — including on exceptions.** That's how "always close the session" is guaranteed both when everything works *and* when the route raises. (Teardown you can't forget by calling the wrong function.)
+
+One real gotcha hiding here: **don't hold a session across an `await` if you can avoid it.** While a DB call blocks, a *thread* holds the connection. Await something slow mid-session and you're pinning a connection open and possibly blocking another request's writer. This constraint is why the caching repositories keep the session out of the hot path.
+
 ### 4.4 Upsert ("insert or update")
 
 ```python
@@ -116,6 +137,8 @@ def save(session: Session, username: str, profile_json: str):
 
 "Upsert" = update the row if it exists, else insert. Two-line logic, huge win for cache semantics.
 
+Why is this more than a convenience? It's the **non-idempotent-write problem**: if you're not careful, the same cache row gets INSERTed twice (a duplicate-PK error, or two rows), or you burn a write for no change. The two-step form encodes the actual semantics — "refresh this cache entry or create it" — and internally SQLAlchemy tracks which objects it has seen to decide `INSERT` vs `UPDATE` at `commit()`. (Databases also have a native `INSERT ... ON CONFLICT ... DO UPDATE` — same family — but the two-step version reads better at this scale.)
+
 ### 4.5 Migrations (Alembic) in one breath
 
 `create_all` builds tables from scratch but **can't evolve them**. Alembic writes migration files:
@@ -127,6 +150,10 @@ alembic upgrade head
 ```
 
 Now when we add a column (Feature 7 adds `views`), we generate a *new* migration that preserves existing rows. Migrations are how real teams ship schema changes safely. Postgres later = just `DATABASE_URL` change.
+
+**Why `create_all` can't evolve the schema:** it reads the model classes and creates *missing* tables — and that's all. It **never alters existing tables**; it was designed for "first time you stand up a DB." Alembic's mechanism is a *version ledger*: it keeps a special `alembic_version` table recording which revision the DB is at. `revision --autogenerate` **diffs** your model metadata against the live DB and generates code for the delta; `upgrade head` applies pending migrations in order. Adding the `views` column later is a **new migration running `ALTER TABLE ADD COLUMN` that preserves existing rows** — whereas `create_all` against an existing DB would do *nothing at all*. That's "the schema is versioned, not just declared."
+
+> **Field note:** autogenerate is a *suggestion engine*, not a diff oracle. It misses column *renames* (usually sees a drop+add instead), and it must be *imported into `env.py`* or it "finds nothing" — the classic silent failure.
 
 ---
 
@@ -246,6 +273,8 @@ class ProfileService:
 - `save(...)` happens **only on a miss** (avoid pointless writes).
 - Notice the *policy* lives here: "if fresh → hit; else fetch+save." That's exactly what a cache is.
 
+**The cache is a three-state machine, and only two are visible.** The state is: **MISS** (no row), **HIT** (row fresh), **STALE** (row old). This repo deliberately collapses STALE → MISS (treat old as missing). Feature 5 collapses *all* of it into a Redis TTL. The underlying, feature-spanning idea is **cache-read policy**: freshness is decided in the *policy layer* (service), while storage lives in the *repository* — that's *why* the service changes nothing when you swap storage in Feature 5. One extension to file away: **stale-but-serve** (Exercise 1) — sometimes it's better to serve a slightly old answer than gamble on a slow/hanging upstream. That "stale-while-revalidate" idea is exactly what Feature 5's Redis TTL and the reference app's KV cache are doing in another costume.
+
 ### Piece 6 — wire the session dependency
 
 ```python
@@ -328,6 +357,20 @@ The service only depends on the *interface*. Feature 5 swaps implementations —
 - [ ] Is all SQL confined to `repositories/`?
 - [ ] Could you switch to Postgres by changing only `DATABASE_URL` + deps? (That's the goal of the layering.)
 - [ ] Are times UTC, and freshness comparisons timezone-aware?
+
+### Field notes — silent failures to expect
+
+> **⚠️ Naive vs aware datetimes.** Mixing `datetime.now()` (naive) and `datetime.now(timezone.utc)` (aware) raises `TypeError: can't compare offset-naive and offset-aware datetimes`. Your `fetched_at` must be consistently aware (UTC) all the way down: at write, at the freshness comparison, and at serialization. The single most common datetime bug in this codebase.
+
+> **⚠️ `check_same_thread=False` is a pragmatic lie, not a virtue.** It relaxes a SQLite-internal safety check (a connection created in one thread may not be used in another). FastAPI may serve requests from multiple threads, hence the flag — but it's exactly why production needs Postgres (proper per-connection thread safety), not "SQLite with the warning off."
+
+> **⚠️ A session that's committed but not refreshed.** After `session.add(row); session.commit()`, the object can hold a stale `id`/defaults until `session.refresh(row)` re-reads them. Feature 6 routers that return an object right after commit rely on refresh. Forget it and the response shows `"id": null` while the DB row exists.
+
+> **⚠️ `.env` location, again (same as Feature 2).** `Settings()` reads `.env` relative to the *current working directory*. Run uvicorn from a different folder and the DB URL silently defaults. If a stray `github_portfolio.db` appears somewhere unexpected, that's the sign.
+
+> **📌 JSON-as-a-column is a *cache* decision, not a data-modeling decision.** Storing a whole portfolio as one JSON string is right when you read it all back whole. The moment you need to query *inside* the profile ("all repos from 2024 with >10 stars"), that storage is wrong — you'd normalize. "Cache = one blob, truth = normalized" is the intuition.
+
+> **📌 Feel a cache hit in the logs.** Request 1 (MISS): hundreds of milliseconds with GitHub calls. Request 2 (HIT): single-digit milliseconds, no GitHub. If you can't distinguish them by timing, you don't have a cache — you have a slower network layer.
 
 ---
 
