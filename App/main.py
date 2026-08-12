@@ -1,10 +1,9 @@
 #filename=main.py
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-from App.routers import hello                #importing hello.py from path App/routers 
+from App.routers import hello                #importing hello.py, from path App/routers which denoted by "from App.routers" 
 from App.routers import Health_test          #importing Healht_test.py from path App/routers 
 from App.routers import username
-
 
 
 app=FastAPI(title="Mygit")
@@ -12,6 +11,9 @@ app=FastAPI(title="Mygit")
 app.include_router(hello.router) 
 app.include_router(Health_test.router)
 app.include_router(username.router)
+
+
+
 
 
 #fastapi only returns JSON thats why we have a response class
