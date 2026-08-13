@@ -19,7 +19,8 @@ class GithubClient:
 #defining the get_user method which will be used by the instance to take usenrame and then check for any exception error and then return the data
     
     async def get_user(self,username:str)->dict:
-        #making a async 
+
+        #making a instance as 'client'
         async with httpx.AsyncClient(self._headers,timeout=15.0) as client:
             r=await client.get(f"{self.BASE}/users/{username}")
 
