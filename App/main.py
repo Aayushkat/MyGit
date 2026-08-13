@@ -20,7 +20,7 @@ app.include_router(username.router)
 ## To return HTML instead, we can use FastAPI's HTMLResponse class.View
 #https://fastapi.tiangolo.com/advanced/custom-response/
 
-@app.get("/",response_class=HTMLResponse)#to handle the get request sent by browser/curl/client accesing out server
+@app.get("/",response_class=HTMLResponse)#to handle the get request sent by browser/curl/client accesing our server
 def home():
     return "<h1>This will become the GITHUB Portfolio</h1>"
 
