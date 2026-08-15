@@ -15,7 +15,7 @@ A **profile cache table**: every portfolio we build gets stored (as JSON) with a
 { "username": "torvalds", "profile": { ... }, "fetched_at": "2026-08-06T12:00:00Z" }
 ```
 
-We'll store it in **SQLite** via **SQLModel**, and manage schema changes with **Alembic** so we can later move to PostgreSQL without tears.
+We'll store it in **SQLite** via **SQLAlchemy 2.0's async ORM**, and manage schema changes with **Alembic** so we can later move to PostgreSQL without tears.
 
 ---
 
@@ -34,8 +34,8 @@ Do the math from the last feature: every `/portfolio` request = **2 GitHub HTTP 
 
 | Technology | Why THIS feature needs it |
 |-----------|---------------------------|
-| **SQLite** | a file-based relational DB — zero setup, perfect for dev; later swap for Postgres |
-| **SQLModel** | SQLAlchemy + Pydantic in one: our schemas become tables (or table rows) |
+| **SQLite** (via **aiosqlite**) | a file-based relational DB — zero setup, perfect for dev; the async driver keeps the event loop free; later swap for Postgres |
+| **SQLAlchemy 2.0 (async ORM)** | the industry-standard Python ORM: typed `Mapped[]` models, `async_sessionmaker` sessions |
 | **Sessions / Engine** | the DB connection pattern FastAPI expects (one session per request) |
 | **Alembic** | schema migrations — so changing our table later doesn't destroy data |
 | (reuse) `httpx`, `config`, `Depends` | all already in place |
@@ -67,28 +67,42 @@ torvalds          {...}           2026-08-06T12:00:00Z
 
 So you're not just "learning SQL" — you're learning "what a file-based single-writer B-tree does," then "what a server-based multi-writer database does." Both are databases; the difference is the concurrency model.
 
-### 4.2 SQLModel: table = a class
+### 4.2 SQLAlchemy 2.0: table = a class
 
-SQLModel lets one class be **both** a Pydantic schema and a DB table:
+SQLAlchemy's **declarative** style maps a Python class to a table. In 2.0, the mapping is *typed*: `Mapped[str]` declares both the Python type and the column type, and `mapped_column(...)` carries the DB details (primary key, defaults, constraints):
 
 ```python
 from datetime import datetime, timezone
-from sqlmodel import SQLModel, Field
+from sqlalchemy import DateTime
+from sqlalchemy.orm import Mapped, mapped_column
+from app.core.db import Base
 
-class ProfileCache(SQLModel, table=True):
-    username: str = Field(primary_key=True)
-    profile_json: str
-    fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+class ProfileCache(Base):
+    __tablename__ = "profile_cache"
+
+    username: Mapped[str] = mapped_column(primary_key=True)
+    profile_json: Mapped[str]
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
 ```
 
-- `table=True` says "this is a real table, not just a schema."
-- `Field(primary_key=True)` makes `username` the unique key (upsert target).
+- Inheriting from `Base` (a `DeclarativeBase` subclass we define once) registers the class in SQLAlchemy's **metadata** — the in-memory catalog of every table the app knows about. Alembic diffs against this metadata later.
+- `mapped_column(primary_key=True)` makes `username` the unique key (upsert target).
 - Store the whole portfolio as **one JSON column** — simplest, and it's what a cache needs. (Normalizing every repo into its own table is over-engineering *for a cache*; we'd normalize if repos were the source of truth.)
 
-**SQLModel is two libraries wearing one coat.** It's a merge of SQLAlchemy and Pydantic. `ProfileCache` is *both* a Pydantic model and a SQLAlchemy table (`table=True` generates the `__table__` metadata from the type annotations and `Field` declarations). Two consequences follow from that dual nature:
+**Two models, two jobs.** Notice we now have *two* kinds of model class in the app, and they are deliberately different libraries:
 
-- `model_dump()` walks the Pydantic fields and serializes to a plain dict; `model_validate(data)` re-runs *validation* (defaults, type checks, coercion) and rebuilds a model. So a cached dict (from `json.loads`) becomes a `Portfolio` again in one call — validation, not just re-casting.
-- **`model_validate` raises if the dict has fields the model doesn't know** (unless `extra="ignore"`). Cache a snapshot under an *older* schema, deploy a model with *fewer* fields, and the cached row throws on read. That's `schema evolution` meeting `cache invalidation` — the "version-skew" problem. Worth naming now so it's not a mystery later.
+- `ProfileCache` (SQLAlchemy) describes **how data lives on disk** — a row.
+- `Portfolio` (Pydantic v2) describes **how data crosses the API boundary** — a validated schema.
+
+The bridge between them is Pydantic's round-trip: `model_dump()` walks the Pydantic fields and serializes to a plain dict; `model_validate(data)` re-runs *validation* (defaults, type checks, coercion) and rebuilds a model. So a cached dict (from `json.loads`) becomes a `Portfolio` again in one call — validation, not just re-casting. Two consequences worth naming:
+
+- **`model_validate` raises if the dict has fields the model doesn't know** (unless `model_config = ConfigDict(extra="ignore")`). Cache a snapshot under an *older* schema, deploy a model with *fewer* fields, and the cached row throws on read. That's `schema evolution` meeting `cache invalidation` — the "version-skew" problem. Worth naming now so it's not a mystery later.
+- Because the DB row and the API schema are separate classes, they can **evolve independently** — you can add a DB column without leaking it into your JSON responses, and vice versa. That separation *is* the design; it's not an accident.
+
+**Why SQLAlchemy rather than SQLModel?** You may see tutorials use **SQLModel** — a wrapper (by FastAPI's author) that merges a SQLAlchemy table and a Pydantic schema into one class. It's genuinely convenient for small apps. Industry codebases still overwhelmingly use plain SQLAlchemy, for three reasons: (1) the "one class = both things" convenience becomes *coupling* the moment your API shape and your table shape need to diverge — which they always eventually do; (2) SQLAlchemy 2.0's typed `Mapped[]` style closed most of the ergonomic gap SQLModel existed to fill; (3) SQLAlchemy is the deeper, better-maintained dependency — every advanced feature (async, relationship loading strategies, compiled query caching) lands there first. Learning SQLAlchemy transfers to nearly every Python job; the design of this feature — repository, freshness window, JSON column — is identical either way.
 
 ### 4.3 Engine + Session (the connection pattern)
 

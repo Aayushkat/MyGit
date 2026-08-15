@@ -67,6 +67,12 @@ Fast and dependency-light; reads like drawing coordinates by hand. (Fiddly for f
 - **`FileResponse("./file.png", media_type="image/png")`** — serves a file from disk; FastAPI sets content-type and handles range requests.
 - **`StreamingResponse(iterable, ...)`** — streams bytes (great for big/on-the-fly content, avoids buffering the whole body in memory).
 - **`Content-Disposition: attachment`** forces a *download* (vs `inline`). Headers `Content-Type` (what the data *is*) vs `Content-Disposition` (how the browser treats it) — both matter.
+- **`Cache-Control: public, max-age=900`** — `public` allows *shared* caches (browser **and** any CDN in front) to keep the body; `max-age` is freshness in seconds. A deterministic image per username makes this free performance. Anything user-specific would say `private` instead — least-privilege thinking applies to caches too.
+
+**Header theory in 60 seconds.** HTTP response headers are latin-1 text, one `name: value` line each. Two consequences you'll meet today:
+
+1. Anything you interpolate into a header value can — if it smuggles in `\r\n` or quotes — *inject* new headers or break parsing. That's why Step 6 sanitizes the filename even though the username was already validated in F2: defense-in-depth means the last layer doesn't trust the first.
+2. Non-ASCII filenames can't ride in the plain `filename="..."` parameter. RFC 6266 defines `filename*=UTF-8''...` (percent-encoded) for that, and browsers prefer it when both appear. GitHub usernames are ASCII by rule, so `filename=` suffices here — but now you know why real-world responses often carry both.
 
 ### 4.3 CPU work off the loop (`asyncio.to_thread`)
 
@@ -77,6 +83,13 @@ png = await asyncio.to_thread(render, username, data)   # off the loop
 ```
 
 **When to `to_thread`: CPU-bound, short-medium work (image/text transforms).** For heavy/long jobs → a worker queue (Step 9). This is the first concrete instance of "respect the event loop."
+
+**Why does a thread help at all if Python has the GIL?** Two reasons, and both matter:
+
+1. Even while the GIL is held, moving the render to a worker thread frees the *event-loop thread* — the loop merely `await`s the result and keeps serving every other request in the meantime. Blocking-the-loop is the sin; the GIL is a separate question.
+2. Well-behaved C extensions — Pillow's pixel and PNG-encoding code included — *release* the GIL while they crunch, so the render genuinely runs in parallel with your Python code on another core.
+
+One more production-relevant detail: `asyncio.to_thread` runs on the loop's default `ThreadPoolExecutor`, sized roughly `min(32, cpu_count + 4)`. That cap is your natural back-pressure: if every worker thread is busy rendering, new renders *queue* instead of stampeding the CPU. When that queue itself becomes the bottleneck, that's your signal you've outgrown threads — see Step 9.
 
 ### 4.4 Trade-off honesty
 
@@ -103,9 +116,11 @@ app/
 
 ### Piece 1 — deps
 
-```txt
-pillow==11.0.0   # (or whatever's current)
+```powershell
+uv add pillow
 ```
+
+> **Toolchain note:** from here on, dependency commands use **uv** — the Rust-based package/environment manager that has become the industry default. `uv add pillow` writes the dependency into `pyproject.toml` *and* pins the exact resolved version in `uv.lock`, so teammates and CI install byte-identical environments. If you've been on `venv` + `pip` since Feature 1, nothing breaks: `pip install pillow` plus a `requirements.txt` line still works, and you can migrate any time with `uv init` then `uv add -r requirements.txt`. Same environment idea — faster tool, lockfile for free. (While you're touching tooling: `uv run ruff check .` before each commit is the modern lint habit; we wire it into CI in F12.)
 
 ### Piece 2 — the service (pure-ish + CPU)
 
@@ -125,6 +140,8 @@ def render_png(username: str, repos: int, stars: int) -> bytes:
     return buf.getvalue()
 ```
 
+> Pillow's default `draw.text` font is a tiny built-in bitmap font — fine for today's proof of mechanics. For a card you'd actually ship, load a real typeface — `ImageFont.truetype("assets/Inter-Bold.ttf", 48)` — and pass it as `font=`. Keep the `.ttf` in the repo so the render is reproducible inside Docker later (F12); "works on my machine because my OS has the font" is a classic image-service bug.
+
 ### Piece 3 — how to be robust
 
 Wrap with **filename sanitize** (injectable headers!) + a note that username is alphanum already (we validated it, but sanitize anyway in `Content-Disposition`).
@@ -134,20 +151,35 @@ Wrap with **filename sanitize** (injectable headers!) + a note that username is 
 ```python
 # app/routers/export.py
 import asyncio
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import Response, StreamingResponse
+from io import BytesIO
+from typing import Annotated
+
+from fastapi import APIRouter, Path
+from fastapi.responses import StreamingResponse
+
 from app.services.export import render_png
 
 router = APIRouter(prefix="/export", tags=["export"])
 
+Username = Annotated[str, Path(min_length=1, max_length=39, pattern=r"^[a-zA-Z0-9-]+$")]
+
 @router.get("/{username}/png")
-async def export_png(username: str = Path(...)):
-    data = await profile_service.get_portfolio(username)   # cached
-    png = await asyncio.to_thread(render_png, username, data.total_repos, data.total_stars)
-    return StreamingResponse(BytesIO(png), media_type="image/png",
-        headers={"Content-Disposition": f'attachment; filename="{username}-portfolio.png"',
-                 "Cache-Control": "public, max-age=900"})
+async def export_png(username: Username):
+    data = await profile_service.get_portfolio(username)   # cached (F4/F5)
+    png = await asyncio.to_thread(
+        render_png, username, data.total_repos, data.total_stars
+    )
+    return StreamingResponse(
+        BytesIO(png),
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f'attachment; filename="{username}-portfolio.png"',
+            "Cache-Control": "public, max-age=900",
+        },
+    )
 ```
+
+Note the `Annotated[str, Path(...)]` — the same declarative validation style you built in Feature 2, extracted into a reusable alias. The router rejects a hostile "username" *before* it can ever reach the header line below.
 
 - `await asyncio.to_thread(...)` → Pillow runs off-loop → returns bytes.
 - `StreamingResponse(BytesIO(png))` streams bytes to the client.

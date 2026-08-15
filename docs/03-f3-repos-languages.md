@@ -52,6 +52,8 @@ The genuinely new skills are **not** technology but *technique*:
 
 > That's a feature with no new dependency — the rarity you should recognize and savor. When the *next* feature needs SQLite/Redis, you'll see a dependency actually become necessary.
 
+**Toolchain aside (2026).** You've been driving `venv` + `pip` since Feature 1, and both keep working — no rug-pull here. But the industry has consolidated on **uv** as the default: one tool that creates the venv, resolves, installs, and locks everything into `pyproject.toml` (`uv init`, `uv add httpx`, `uv run uvicorn app.main:app --reload`), fast enough that "rebuild the env from scratch" stops being a chore. Its usual companion is **ruff** — linter *and* formatter, also configured in `pyproject.toml` — which will gate our CI in Feature 11. Since this feature adds zero dependencies there is nothing to migrate today; when Feature 4 brings real ones (SQLAlchemy, Alembic) we'll adopt uv properly. When you're ready, in PowerShell: `winget install astral-sh.uv`.
+
 ---
 
 ## Step 4 · Teach only the required concepts
@@ -62,9 +64,11 @@ The genuinely new skills are **not** technology but *technique*:
 
 We don't want to return all of that; we **project** to the fields the portfolio needs.
 
+This narrowing has a name — **projection**, the same word as SQL's `SELECT a, b`: keep only the fields you need, renamed into *your* vocabulary. Notice the renames coming in Piece 1: `stargazers_count` → `stars`, `login` → `username`, `fork` → `is_fork`. That's deliberate. The schema layer is a **translation boundary** (DDD calls it an *anti-corruption layer*): GitHub's naming quirks stop at the client/schema seam and never spread into services, routers, or the frontend. If GitHub renames a field one day, you edit one mapping — not forty call-sites.
+
 ### 4.2 Aggregation with a dict (counting by language)
 
-Emoji counting "how many repos per language" is a classic aggregation:
+Counting "how many repos per language" is a classic aggregation:
 
 ```python
 counts = {}                    # language -> count
@@ -110,6 +114,8 @@ top_languages = langs[:5]
 ```
 
 `sorted(..., reverse=True)` = high-to-low. We then **slice** (`[:5]`) to cap the list — don't send 50 languages.
+
+One property worth knowing by name: Python's sort is **stable** (the algorithm is Timsort) — items that compare equal keep their original relative order. Sort repos by stars and two 10-star repos stay in the order the API sent them. Stability is why the "sort by secondary key first, then by primary key" chained-sort trick works at all, and why `most_common()` ties preserve insertion order.
 
 ### 4.5 Why "pure function" is the single most valuable idea in this feature
 
