@@ -72,6 +72,14 @@ const data = await res.json();
 - **Always `res.ok`** (status 2xx) check before `.json()`.
 - This is the exact mirror of our server's `httpx` usage — both make HTTP. The realization "our JS is a client, like our Python client was" clicks the whole system together.
 
+**Timeouts — `fetch` has none by default.** Our server-side httpx client got an explicit timeout back in F2; the browser deserves the same discipline:
+
+```js
+const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+```
+
+`AbortSignal.timeout(5000)` aborts the request after 5 s and rejects with a `TimeoutError` — catch it and show a "try again" state instead of a spinner that never ends. (This one-liner is the modern form; older code wires an `AbortController` by hand, which you'll still meet in tutorials from before ~2023.)
+
 ### 4.3 Building DOM safely (XSS)
 
 API data (bios, repo names) is *untrusted* — it could contain `<script>`. Never inject it via `innerHTML`. Build nodes or set `.textContent`:

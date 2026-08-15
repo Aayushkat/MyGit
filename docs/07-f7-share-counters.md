@@ -6,7 +6,7 @@
 
 ## Step 1 · What are we building today
 
-1. **Shareable links for saved portfolios**: `GET /p/{username}?template=bento` renders/refers to a portfolio the same way the reference app does — the whole view <config> lives in the URL.
+1. **Shareable links for saved portfolios**: `GET /p/{username}?template=bento` renders/refers to a portfolio the same way the reference app does — the whole view *config* lives in the URL.
 2. **A public, non-login profile page**: anyone with the link can see the portfolio (no auth). That's "shareability."
 3. **View counter**: each time a portfolio page loads, we count one view. The landing page shows the **global total** ("X portfolios generated").
 
@@ -50,6 +50,8 @@ A URL can **carry the entire view**: `format`, `template`, `theme`, username (in
 
 That's the entire "share" UX — no login required to *view*.
 
+**A little query-string theory** (since the URL is now our state store): the part after `?` is a list of `key=value` pairs joined by `&`, percent-encoded so any character can travel safely (`space` → `%20`). Two useful properties: pairs are **order-insensitive** (`?a=1&b=2` ≡ `?b=2&a=1` — normalize before comparing/caching), and only **safe, idempotent GET views** should be URL-addressable. If loading a URL *changed* data, sharing it would be dangerous (this is exactly why our view-count bump is a side effect we treat as best-effort, not part of the resource's state).
+
 ### 4.2 FastAPI `BackgroundTasks`
 
 ```python
@@ -65,6 +67,15 @@ async def portfolio(username: str, bg_tasks: BackgroundTasks):
 ```
 
 **Under the hood:** FastAPI collects tasks, sends the **response to the client first**, then awaits the background tasks. The client isn't blocked by `bump_counter`. This is "make fast things fast, defer slow things" made literal.
+
+Note the parameter style: `bg_tasks: BackgroundTasks` — a bare annotation, **no default value**. FastAPI sees the type and injects a fresh instance per request. (The older pattern `bg: BackgroundTasks = BackgroundTasks()` floats around in old tutorials — avoid it. A default value in Python is evaluated *once* at function definition, so if the function is ever called directly, e.g. in a test, every call would share one task list. Bare annotation = one instance per request, always.)
+
+**Where does the task actually run?** This matters more than it looks:
+
+- The task runs **in the same worker process**, right after the response body is sent — Starlette attaches your tasks to the `Response` object and awaits them in order once the client has its bytes.
+- An `async def` task runs on the **event loop**; a plain `def` task is pushed to the **thread pool** (so it can't block the loop). Either way, a slow task delays *the next tasks*, not the response.
+- **At-most-once semantics**: if the process dies mid-task, the task is simply gone. No retry, no queue, no persistence. That's fine for a counter; it would *not* be fine for "send the password-reset email."
+- **Exceptions vanish silently** unless you catch and log them inside the task. Wrap real tasks in `try/except` + a log line (Feature 13's structured logging will make those failures visible on a dashboard).
 
 > Rule of thumb: `BackgroundTasks` for *light, best-effort* work (a counter increment, a log, an email). For *heavy/critical/retryable* work you'd graduate to a task queue (Feature 8's export touches this). For *now*, an INCR is perfect.
 

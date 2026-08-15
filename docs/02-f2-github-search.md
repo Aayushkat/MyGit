@@ -48,6 +48,8 @@ Only what this feature needs:
 | **GitHub REST API** | the data source |
 | **Pydantic `response_model`** | define + validate the exact JSON we return |
 | **configuration (env / `.env`)** | store the GitHub token so we can turn it up or off |
+| **uv** *(toolchain upgrade)* | our dependency list just grew — time to manage it the way industry does (Piece 0) |
+| **ruff** *(toolchain upgrade)* | one fast linter + formatter, configured in `pyproject.toml` |
 
 Not yet: database, Redis, auth, frontend framework. We'll have good reason for each of those when they arrive.
 

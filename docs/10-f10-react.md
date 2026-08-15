@@ -6,15 +6,15 @@
 
 ## Step 1 · What are we building today
 
-We **rewrite** the portfolio frontend (F9) as a small **React** app:
+We **rewrite** the portfolio frontend (F9) as a small **React + TypeScript** app:
 
-- One `App` component with `useState` for the search + theme.
-- A `Portfolio` component that fetches and renders.
-- Same features (search, stats, languages, theme) — but now declarative.
+- One `App` component with `useState` for the search + theme (**UI state**).
+- A `Portfolio` component that fetches and renders via **TanStack Query** (**server state**).
+- Same features (search, stats, languages, theme) — but now declarative and typed.
 
-```jsx
+```tsx
 function App() {
-  const [theme, setTheme] = useState("dark");
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
   return (
     <div data-theme={theme}>
       <Search onSearch={setUsername} />
@@ -34,6 +34,8 @@ function App() {
 
 That's why frameworks exist — not to look cool, but because manual DOM sync is a serious maintainability trap.
 
+**A second pain hides inside the first:** half of what F9 juggled wasn't really *UI* state at all — it was a hand-rolled cache of *server* data (the fetched portfolio) plus its loading/error bookkeeping. Treating those as the same kind of state is what made the choreography explode. React fixes the rendering half; a **server-state library** (TanStack Query) fixes the fetching half. This chapter installs both ideas.
+
 ---
 
 ## Step 3 · What new technologies are required
@@ -41,9 +43,11 @@ That's why frameworks exist — not to look cool, but because manual DOM sync is
 | Technology | Why this feature needs it |
 |-----------|---------------------------|
 | **React** (`react`, `react-dom`) | the "UI = f(state)" engine |
-| **Vite** | dev server + build tool + JSX compile (replaces "no build step") |
-| **JSX** | the HTML-in-JS syntax React uses |
-| **`useState` / `useEffect`** | component state + side-effects (fetch) |
+| **Vite** | dev server + build tool + TS/JSX compile (replaces "no build step") |
+| **TypeScript** | typed props + a compile-time copy of the API contract |
+| **JSX / TSX** | the HTML-in-JS syntax React uses |
+| **`useState` / `useEffect`** | component UI state + side-effects |
+| **TanStack Query** (`@tanstack/react-query`) | server state: caching, dedup, client-side SWR |
 | (reuse) the SAME REST API | the backend doesn't change at all |
 
 **The big realization:** **nothing on the backend changes.** React is purely a *presentation* concern. The API contract (F2's `response_model`) is the interface both frontends consumed. This is why "frontend and backend talk JSON" is the load-bearing wall of the whole architecture.
@@ -54,13 +58,17 @@ That's why frameworks exist — not to look cool, but because manual DOM sync is
 
 ### 4.1 Components = functions that return UI
 
-```jsx
-function RepoList({ repos }) {           // props in, JSX out
+```tsx
+type RepoListProps = { repos: { name: string }[] };
+
+function RepoList({ repos }: RepoListProps) {   // props in, JSX out
   return <ul>{repos.map(r => <li key={r.name}>{r.name}</li>)}</ul>;
 }
 ```
 
-Components take **props** (read-only data) and return **JSX** (HTML-ish). Reuse via composition.
+Components take **props** (read-only data) and return **JSX** (HTML-ish). Reuse via composition. The props type is the component's contract — pass the wrong shape and the compiler refuses, the exact service Pydantic performs for your endpoints.
+
+A note on `key`: when React re-renders a list it matches old children to new ones **by key**, not by position. A stable identity (`r.name`) lets it move items instead of recreating them; an array index as key silently mis-associates state when the list reorders. Same idea as a primary key in F4.
 
 ### 4.2 State and effects
 

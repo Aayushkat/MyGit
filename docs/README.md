@@ -35,32 +35,37 @@ You write every file. I explain every line's *why*, review your code, and point 
 ```
 FEATURE-DRIVEN ROADMAP
 ─────────────────────────────────────────────────────────────────────────────
-FEATURE 1  · Hello, Portfolio API          → Python, FastAPI, uvicorn,
+FEATURE 1  · Hello, Portfolio API          → Python, uv, FastAPI, uvicorn,
 │                                              routing, first GET, JSON
 FEATURE 2  · GitHub profile search          → httpx, async/await, GitHub REST,
-│                                              Pydantic responses, env config
+│                                              Pydantic v2 models, env config
 FEATURE 3  · Repos + language stats         → data transforms, aggregation,
 │                                              sorting, response models
-FEATURE 4  · Stop hitting rate limits       → SQLite, SQLModel, sessions,
-│            (persist what we fetch)            Alembic migrations
-FEATURE 5  · Fast + polite caching          → Redis, cache-aside, SWR,
-│            (rate limiting our API)            sliding window, 429
-FEATURE 6  · Accounts & saved portfolios    → password hashing, JWT, OAuth2,
-│                                              protected routes
+FEATURE 4  · Stop hitting rate limits       → SQLite, SQLAlchemy 2.0 (async),
+│            (persist what we fetch)            sessions, Alembic migrations
+FEATURE 5  · Fast + polite caching          → Redis (redis-py asyncio),
+│            (rate limiting our API)            cache-aside, SWR, sliding
+│                                              window, 429
+FEATURE 6  · Accounts & saved portfolios    → Argon2 hashing (pwdlib), JWT
+│                                              (PyJWT), OAuth2, protected routes
 FEATURE 7  · Share links + view counters    → URL state, background tasks,
 │                                              counter flush pattern
 FEATURE 8  · Export as PNG / PDF            → file + streaming responses,
 │                                              Pillow, CPU→thread pool
 FEATURE 9  · The real frontend              → HTML, CSS, DOM, fetch,
 │            (HTML/CSS/JS)                      localStorage, XSS safety
-FEATURE 10 · Rebuild frontend in React      → why frameworks exist,
-│                                              components, state
-FEATURE 11 · Test everything                → pytest, TestClient, fakes, DI
-│                                              overrides, TDD
-FEATURE 12 · Ship it                        → Docker, docker-compose,
-│                                              CI (GitHub Actions), deploy
-FEATURE 13 · Make it production              → logging, security hardening,
-└──────────────────────────────────────────────  observability, health checks
+FEATURE 10 · Rebuild frontend in React      → why frameworks exist, Vite,
+│                                              React + TypeScript, components,
+│                                              TanStack Query, state
+FEATURE 11 · Test everything                → pytest + anyio, httpx AsyncClient,
+│                                              fakes, DI overrides, coverage,
+│                                              ruff in CI, TDD
+FEATURE 12 · Ship it                        → multi-stage Docker (built on uv),
+│                                              docker compose, CI (GitHub
+│                                              Actions + uv caching), deploy
+FEATURE 13 · Make it production              → structlog JSON logging, security
+└──────────────────────────────────────────────  hardening, OpenTelemetry,
+                                                 /healthz + /readyz, Prometheus
 ```
 
 **Why this order?** Each feature creates the *pain* that justifies the next technology:
@@ -72,14 +77,19 @@ FEATURE 13 · Make it production              → logging, security hardening,
 
 Tech is never "assigned" — it *grows out of* the project.
 
+> **Industry lens:** This roadmap is how real engineering orgs ship. Nobody builds "the whole system" and then releases it: teams write a short design doc or **RFC** for the next slice, get it reviewed, ship a thin vertical (API → storage → UI) behind a small surface, and only then earn the next layer of infrastructure. Redis appears when a latency SLO is missed, not on day one; auth appears when there's something worth protecting. When an interviewer asks *"why did you add X?"*, the strongest answer is exactly the one this handbook trains: name the pain first, then the tool.
+
 ---
 
 ## Your tools for each chapter
 
 - **A terminal** (PowerShell on Windows here).
-- **Python 3.11+** and a virtual environment (`uv` or `venv`).
+- **Python 3.11+** managed with **uv** — the industry-default package & environment manager. One tool replaces `pip`, `venv`, and `pip-tools`: `uv init` creates a project, `uv add fastapi` records the dependency in `pyproject.toml` and locks it, `uv run uvicorn app.main:app --reload` runs inside the managed environment without ever "activating" anything.
+- **ruff** as linter *and* formatter, configured in the same `pyproject.toml` (`uv run ruff check .` / `uv run ruff format .`). One fast tool where teams used to stack flake8 + isort + black.
 - **Git** (we'll commit after each feature — that's how you learn it).
 - **A browser** with DevTools open (Network tab will become your best friend).
+
+> **Already on `venv` + `pip`?** Keep going — nothing in this handbook breaks. `python -m venv .venv` + `pip install` and `uv` produce the same kind of environment; `uv` just does it faster and writes a lockfile so teammates and CI get *identical* installs. When you're ready, `uv init` in the project root and `uv add` each package from your `requirements.txt` — that's the whole migration. We use `uv` in examples from here on because it's what you'll meet in industry.
 
 ---
 
@@ -90,14 +100,27 @@ By the last feature, from memory and understanding:
 - [ ] Trace a request from browser to JSON and back, naming each layer.
 - [ ] Explain why we have routers, services, repositories, clients — and what breaks without them.
 - [ ] Read/design a REST API: verbs, status codes, pagination, versioning.
-- [ ] Write and migrate a schema (SQLite → Postgres).
+- [ ] Write and migrate a schema (SQLite → Postgres, SQLAlchemy 2.0 + Alembic).
 - [ ] Cache correctly (Redis, SWR) and rate-limit safely.
-- [ ] Authenticate with JWT and hash passwords.
+- [ ] Authenticate with JWT (PyJWT) and hash passwords with Argon2 (pwdlib).
 - [ ] Run background jobs without blocking the event loop.
-- [ ] Build a JS frontend, then migrate it to React and explain why.
-- [ ] Test with pytest + TestClient + fakes.
+- [ ] Build a JS frontend, then migrate it to React + TypeScript and explain why.
+- [ ] Test with pytest + httpx `AsyncClient` + fakes + dependency overrides.
 - [ ] Containerize, CI, deploy.
-- [ ] Harden and monitor it like a production app.
+- [ ] Harden and monitor it like a production app (structured logs, traces, health probes).
+
+---
+
+## Sibling handbooks
+
+This handbook has siblings — same mentor voice, same feature-driven method, different terrain:
+
+- **`docs-backend-aws/`** — take a backend like this one to AWS: managed databases, queues, IAM, deployment beyond a single box.
+- **`docs-android/`** — the same product thinking applied to a native Android client.
+- **`docs-ios/`** — likewise for iOS.
+- **`docs-ml/`** — machine learning as a product feature, not a notebook exercise.
+
+Finish (or get deep into) this one first — every sibling assumes you can already build and reason about an API.
 
 ---
 

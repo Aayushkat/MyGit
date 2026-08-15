@@ -6,7 +6,7 @@
 
 ## Step 1 · What are we building today
 
-1. **Replace the SQLite profile cache with Redis** (cache-aside, with a TTL that Redis handles for us).
+1. **Replace the SQLite profile cache with Redis** (cache-aside with **stale-while-revalidate**: Redis stores the bytes and garbage-collects them; *our code* decides what counts as fresh).
 2. **Add rate limiting to our API**: `429 Too Many Requests` with a `Retry-After` header.
 3. (Bonus) Use Redis's atomic `INCR` for the **view counter** that the reference app has — that's Feature 7's seed, but the *tool* arrives here.
 
@@ -38,7 +38,7 @@
 
 Redis is a **separate program** (like SQLite/PG) that stores keys→values in **RAM**. Two things it's famously good at:
 
-- **`SET key val EX <ttl>`** — set with expiry; Redis auto-deletes after TTL. This replaces our manual `fetched_at` freshness logic!
+- **`SET key val EX <ttl>`** — set with expiry; Redis auto-deletes after TTL. Careful with what this replaces: it replaces our manual *cleanup* (no more purging dead rows) — whether it also replaces the *freshness* check is subtler, and getting it wrong is the classic caching mistake. See 4.3.
 - **`INCR key`** — atomically increments a number. Perfect for counters *and* rate limiting (no two processes double-count).
 
 ```python
@@ -50,7 +50,7 @@ val = await r.get(f"profile:{username}")   # None if expired/miss
 await r.incr("views:torvalds")             # atomic +1
 ```
 
-**Why is `INCR` atomic when SQLite's UPDATE wasn't?** The design detail most tutorials skip: **Redis is single-threaded.** Every command (`GET`, `SET`, `INCR`, `EXPIRE`) runs on one thread, one after another. Two clients' `INCR` on the same key can never execute *simultaneously* — command 1 finishes fully before command 2 starts. That serialization *is* the atomicity: "an operation that can't be observed mid-way by any other client." `INCR` is "read → add 1 → write," three steps that race on a multi-writer DB but can't on a one-thread server. No locks needed — serialization is built into the architecture.
+**Why is `INCR` atomic when SQLite's UPDATE wasn't?** The design detail most tutorials skip: **Redis is single-threaded.** Every command (`GET`, `SET`, `INCR`, `EXPIRE`) runs on one thread, one after another. (Since Redis 6 there *are* extra I/O threads, but they only read and write sockets — command **execution** still happens on one thread, so the guarantee stands.) Two clients' `INCR` on the same key can never execute *simultaneously* — command 1 finishes fully before command 2 starts. That serialization *is* the atomicity: "an operation that can't be observed mid-way by any other client." `INCR` is "read → add 1 → write," three steps that race on a multi-writer DB but can't on a one-thread server. No locks needed — serialization is built into the architecture.
 
 **TTL expiry isn't magic — it's checked lazily.** Redis doesn't delete the key "at exactly 900s." Keys expire on *access*: the next `GET` checks the stored time and returns nothing if it's past. (There's also a periodic passive cleanup pass to avoid memory leaks — but the *contract to you* is "expired = value missing.") That's why "never stored" and "just expired" are indistinguishable to a reader — which is *exactly right* for a cache: both mean "miss, go refetch."
 

@@ -35,12 +35,14 @@ Two things we *must* learn while doing it:
 
 | Technology | Why THIS feature needs it |
 |-----------|---------------------------|
-| **Password hashing (bcrypt via `passlib`)** | never store a plaintext password |
-| **JWT (`pyjwt`)** | a signed token the server verifies without a DB lookup |
+| **Password hashing (Argon2 via `pwdlib`)** | never store a plaintext password |
+| **JWT (`PyJWT`)** | a signed token the server verifies without a DB lookup |
 | **`OAuth2PasswordBearer`** | FastAPI's standard hook to read `Authorization: Bearer` |
-| (reuse) SQLModel tables (User, Portfolio), sessions, Depends | all in place |
+| (reuse) SQLAlchemy tables (User, Portfolio), async sessions, `Depends` | all in place |
 
-**Why not full OAuth2 "Login with GitHub" yet?** That needs a registered GitHub OAuth app (client ID/secret) and adds a redirect dance. The *core* concept — "prove you are who you say" — is exactly the same; we'll add GitHub OAuth later as a stretch (Step 8 notes how). Password+JWT teaches the mechanism with zero external sign-up.
+**A note on the hashing library.** For years every tutorial (this one included, in an earlier life) said `passlib`. **passlib is unmaintained** — its last release was 2020, and it breaks noisily with modern `bcrypt`. The ecosystem's answer is **`pwdlib`**: a small, maintained library from the FastAPI ecosystem whose `PasswordHash.recommended()` hands you **Argon2id**, the current OWASP first-choice algorithm. Same two-function surface (hash, verify), modern internals.
+
+**Why not full OAuth2 "Login with GitHub" yet?** That needs a registered GitHub OAuth app (client ID/secret) and adds a redirect dance. The *core* concept — "prove you are who you say" — is exactly the same; we'll add GitHub OAuth later as a stretch (Step 8 notes how, and names the industry term: OIDC). Password+JWT teaches the mechanism with zero external sign-up.
 
 ---
 

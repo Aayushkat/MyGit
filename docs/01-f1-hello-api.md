@@ -32,13 +32,20 @@ Everything else in the project is built *on top of* this skeleton. If this feels
 
 ## Step 3 · What new technologies are required
 
-Exactly three, because that's all this feature needs:
+Exactly three runtime pieces, because that's all this feature needs:
 
 | Technology | Why this feature needs it |
 |-----------|---------------------------|
 | **Python** | the language we chose for the backend |
 | **FastAPI** | the framework that turns "a URL" into "a Python function" |
 | **uvicorn** | the server that actually listens on a port and speaks HTTP |
+
+Plus two **workshop tools**. They never ship to users, but a professional repo has them from day one:
+
+| Tool | Why it exists |
+|------|---------------|
+| **uv** | package + environment manager — the industry default in 2026: one fast tool that replaces `venv` + `pip`, with a lockfile for reproducibility |
+| **ruff** | linter **and** formatter — catches real mistakes and ends style debates, configured in `pyproject.toml` |
 
 That's it. No database, no Redis, no Docker, no frontend. When a future feature needs those, *that* feature will introduce them.
 
@@ -75,7 +82,9 @@ def hello():
 
 ### 4.3 What "GET" is
 
-HTTP has verbs (Chapter 0 already set the stage). `GET` means *"retrieve something, change nothing."* It's the right verb for a page that just shows data. We'll meet `POST` in Feature 2's login/search later.
+HTTP has verbs (Chapter 0 already set the stage). `GET` means *"retrieve something, change nothing."* It's the right verb for a page that just shows data. Feature 2's profile search stays `GET` too (fetching is still retrieval); we'll meet `POST` when accounts and saved portfolios arrive in Feature 6 — `POST` is for requests that *create or change* something on the server.
+
+That distinction has a name: `GET` is **safe** (no side effects) and **idempotent** (calling it twice is the same as once). Browsers, proxies, and caches *rely* on this — they will happily prefetch or replay a `GET`. Put a side effect behind a `GET` and something in the chain will eventually trigger it when you didn't ask. This is the first API-design rule you'll carry through all thirteen features.
 
 ### 4.4 Why `main.py`?
 
