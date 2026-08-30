@@ -5,7 +5,6 @@ from App.routers import hello                #importing hello.py, from path App/
 from App.routers import Health_test          #importing Healht_test.py from path App/routers 
 from App.routers import username
 
-
 app=FastAPI(title="Mygit")
 #The 'router=APIrouter()' inside the the file hello.py
 app.include_router(hello.router) 
