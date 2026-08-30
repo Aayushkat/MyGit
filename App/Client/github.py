@@ -33,7 +33,7 @@ class GithubClient:
         
         if settings.github_token:
             self._headers["Authorization"] = f"token {settings.github_token}"
-#defining the get_user method which will be used by the instance to take usenrame and then check for any exception error and then return the data
+            #defining the get_user method which will be used by the instance to take usenrame and then check for any exception error and then return the data
     
     async def get_user(self,username:str)->dict:
 
