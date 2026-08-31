@@ -38,7 +38,7 @@ class GithubClient:
     async def get_user(self,username:str)->dict:
 
         #making a async instance as vairable, named: 'client'
-        async with httpx.AsyncClient(self._headers,timeout=15.0) as client:
+        async with httpx.AsyncClient(headers=self._headers,timeout=15.0) as client: #Make sure to pass only keyword arguemtn in the httpx.AsyncClient because it doesnt accept positional argument
             r=await client.get(f"{self.BASE}/users/{username}")
 
 
