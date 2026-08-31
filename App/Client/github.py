@@ -24,7 +24,7 @@ from App.config import settings # directly immported the settings object fromt t
 
 
 class GithubClient:
-    BASE="http://api.github.com"
+    BASE="https://api.github.com"#GitHub's API only serves over 'https://.' so make sure to sue secured http 
 
     def __init__(self):
         self._headers = {"Accept": "application/vnd.github.v3+json",
