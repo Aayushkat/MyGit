@@ -11,13 +11,12 @@ router=APIRouter(
 def get_client()-> GithubClient:
     return GithubClient()# there should be parenthesis or then it will only return the class itlself rather than instance of that class
 
-@router.get("/{username}",response_class=HTMLResponse)
+@router.post("/{username}",response_class=HTMLResponse)
 async def get_user(
     username:str =Path(...,min_length=1,max_length=39,pattern=r"^[a-zA-Z0-9-]+$"),
     client: GithubClient =Depends(get_client),
     ):
     data=await client.get_user(username)
-
     return f""" 
         <style>
         .myDiv {{
@@ -44,11 +43,12 @@ async def get_user(
         <p>Public Repositories: {data.get("public_repos",0)}</p>
         </div>
         """
-    '''' return GitHubUser(login=data.get("login"),
+
+    
+    ''' return GitHubUser(login=data.get("login"),
                       name=data.get("name"),
                       bio=data.get("bio"),
                       avatar_url=data.get("avatar_url"),
                       followers=data.get("followers",0),
-                    following=data.get("following",0),
-                    public_repos=data.get("public_repos",0)
-                      )'''
+                      following=data.get("following",0),
+                      public_repos=data.get("public_repos",0))'''

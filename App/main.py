@@ -18,13 +18,12 @@ app.include_router(github.router)
 ## To return HTML instead, we can use FastAPI's HTMLResponse class.View
 #https://fastapi.tiangolo.com/advanced/custom-response/
 
-@app.get("/",response_class=HTMLResponse)#to handle the get request sent by browser/curl/client accesing our server
+@app.get("/users",response_class=HTMLResponse)#to handle the get request sent by browser/curl/client accesing our server
 def home():
-    return """<h1>Search the Github Profile</h1>
-    <form action="/" method="get">
-    <label>Username<input name="q"></label>
+    return """
+    <h1>Search the Github Profile</h1>
+    <form  method="post" onsubmit="this.action = '/users/' + document.querySelector('input[name=username]').value">
+    <label>Username<input name="username"></label>
     </form>
-    
-    
     """
 
