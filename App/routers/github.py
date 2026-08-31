@@ -6,9 +6,9 @@ router=APIRouter(
     prefix="/users",        #prefix is the common URL before every routes of router
     tags=["users"]                  #Metadata for Doumentation organization
     )
-
+#rather than hardcoding the object initiation in the get_user ,using dependancy injection will help us in several ways:Testing.resource management
 def get_client()-> GithubClient:
-    return GithubClient()
+    return GithubClient()# there should be parenthesis or then it will only return the class itlsefl rather than instance of that class
 
 @router.get("/{username}",response_model=GitHubUser)
 async def get_user(
