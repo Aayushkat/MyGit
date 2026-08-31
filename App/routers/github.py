@@ -1,6 +1,6 @@
 from fastapi import APIRouter,Depends,Path
 from App.Client.github import GithubClient
-from App.schemas.schema import GitHubUser
+from App.Schemas.schema import GitHubUser
 
 router=APIRouter(
     prefix="/users",        #prefix is the common URL before every routes of router
