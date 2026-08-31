@@ -1,4 +1,5 @@
 from fastapi import APIRouter,Depends,Path
+from fastapi.responses import HTMLResponse
 from App.Client.github import GithubClient
 from App.Schemas.schema import GitHubUser
 
@@ -10,17 +11,28 @@ router=APIRouter(
 def get_client()-> GithubClient:
     return GithubClient()# there should be parenthesis or then it will only return the class itlself rather than instance of that class
 
-@router.get("/{username}",response_model=GitHubUser)
+@router.get("/{username}",response_model=HTMLResponse)
 async def get_user(
     username:str =Path(...,min_length=1,max_length=39,pattern=r"^[a-zA-Z0-9-]+$"),
     client: GithubClient =Depends(get_client),
     ):
     data=await client.get_user(username)
-    return GitHubUser(login=data.get("login"),
+
+    return f""" 
+        <h1>Details are:</h1>
+        <p>{data.get("login")}</p>
+        <p>{data.get("name")}</p>
+        <p>{data.get("bio")}</p>
+        <p>{data.get("avatar_url")}</p>
+        <p>{data.get("followers",0)}</p>
+        <p>{data.get("following",0)}</p>
+        <p>{data.get("public_repos",0)}</p>
+        """
+    '''' return GitHubUser(login=data.get("login"),
                       name=data.get("name"),
                       bio=data.get("bio"),
                       avatar_url=data.get("avatar_url"),
                       followers=data.get("followers",0),
                     following=data.get("following",0),
                     public_repos=data.get("public_repos",0)
-                      )
+                      )'''
