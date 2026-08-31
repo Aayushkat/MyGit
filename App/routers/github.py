@@ -8,12 +8,12 @@ router=APIRouter(
     )
 
 def get_client()-> GithubClient:
-    return GithubClient 
+    return GithubClient()
 
 @router.get("/{username}",response_model=GitHubUser)
 async def get_user(
     username:str =Path(...,min_length=1,max_length=39,pattern=r"^[a-zA-Z0-9-]+$"),
-    client:GithubClient =Depends(get_client),
+    client: GithubClient =Depends(get_client),
     ):
     data=await client.get_user(username)
     return GitHubUser(username=data["login"],
