@@ -20,5 +20,11 @@ app.include_router(github.router)
 
 @app.get("/",response_class=HTMLResponse)#to handle the get request sent by browser/curl/client accesing our server
 def home():
-    return "<h1>This will become the GITHUB Portfolio</h1>"
+    return """<h1>Search the Github Profile</h1>
+    <form action="/" method="get">
+    <label>Username<input name="q"></label>
+    </form>
+    
+    
+    """
 
