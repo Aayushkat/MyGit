@@ -11,7 +11,7 @@ router=APIRouter(
 def get_client()-> GithubClient:
     return GithubClient()# there should be parenthesis or then it will only return the class itlself rather than instance of that class
 
-@router.get("/{username}",response_model=HTMLResponse)
+@router.get("/{username}",response_class=HTMLResponse)
 async def get_user(
     username:str =Path(...,min_length=1,max_length=39,pattern=r"^[a-zA-Z0-9-]+$"),
     client: GithubClient =Depends(get_client),
@@ -19,14 +19,30 @@ async def get_user(
     data=await client.get_user(username)
 
     return f""" 
+        <style>
+        .myDiv {{
+        border: 5px outset red;
+        background-color: lightblue;
+        text-align: center;
+        }}
+        .myDiv p {{
+            font: small-caps bold 1.2rem sans-serif;
+            text-align: center;
+            }}
+
+        </style>
+    
+        <div class="myDiv">
         <h1>Details are:</h1>
-        <p>{data.get("login")}</p>
-        <p>{data.get("name")}</p>
-        <p>{data.get("bio")}</p>
-        <p>{data.get("avatar_url")}</p>
-        <p>{data.get("followers",0)}</p>
-        <p>{data.get("following",0)}</p>
-        <p>{data.get("public_repos",0)}</p>
+        <p>Username: {data.get("login")}</p>
+        <p>NAme: {data.get("name")}</p>
+        <p>Bio: {data.get("bio")}</p>
+        <img src="{data.get("avatar_url")}" alt="User Avatar" />
+        
+        <p>Followers: {data.get("followers",0)}</p>
+        <p>Followings: {data.get("following",0)}</p>
+        <p>Public Repositories: {data.get("public_repos",0)}</p>
+        </div>
         """
     '''' return GitHubUser(login=data.get("login"),
                       name=data.get("name"),
