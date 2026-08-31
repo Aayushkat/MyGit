@@ -16,7 +16,7 @@ async def get_user(
     client: GithubClient =Depends(get_client),
     ):
     data=await client.get_user(username)
-    return GitHubUser(username=data["login"],
+    return GitHubUser(login=data.get("login"),
                       name=data.get("name"),
                       bio=data.get("bio"),
                       avatar_url=data.get("avatar_url"),
