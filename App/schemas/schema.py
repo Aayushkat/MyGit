@@ -20,6 +20,10 @@ class Repo(BaseModel):
     language: str | None=None
     is_fork: bool =False
 
+class Language_stat(BaseModel):
+    Name:str 
+    percentage: int=0
+    
 
 
 
