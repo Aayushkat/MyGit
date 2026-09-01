@@ -52,3 +52,22 @@ class GithubClient:
 #we cant raise custom exceptions for every status error so rest of the exceptions are raised by 'raise_for_status()' function ,as it is. 
         r.raise_for_status()
         return r.json()
+
+#---------------------------------------------------------------------------------------------------------------------------------------
+    async def get_repositories(self, username: str, per_page: int = 100) -> list[dict]:
+        async with httpx.AsyncClient(headers=self._headers, timeout=15.0) as client:
+            r = await client.get(
+                f"{self.BASE}/users/{username}/repos",
+                params={"sort": "stars", "direction": "desc", "per_page": per_page},
+            )
+
+        
+        #handle user not found
+        if r.status_code == 404:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        #handle rate limit(403) or private repo(429)
+        if r.status_code == 403 or r.status_code == 429:
+            raise HTTPException(status_code=429, detail="GitHub rate limited")
+        r.raise_for_status()
+        return r.json()
