@@ -12,6 +12,80 @@ class GitHubUser(BaseModel):  # GitHubuser class is inheritng from BaseModel cla
     public_repos: int=0
 
 
+
+class Repo(BaseModel):
+    name:str
+    stars:    int = 0
+    forks:    int= 0
+    language: str | None=None
+    is_fork: bool =False
+
+class Language_stat(BaseModel):
+    Name:str 
+    percentage: int=0
+
+class Portfolio(BaseModel):
+    user: GitHubUser
+    total_repos: int
+    total_stars: int
+    top_languages: list[Language_stat]
+    repositories: list[Repo]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # IMPORTANT CONCEPT:
 #
 # There are TWO separate HTTP conversations in this feature:
