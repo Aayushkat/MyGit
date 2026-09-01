@@ -23,7 +23,13 @@ class Repo(BaseModel):
 class Language_stat(BaseModel):
     Name:str 
     percentage: int=0
-    
+
+class Portfolio(BaseModel):
+    user: GitHubUser
+    total_repos: int
+    total_stars: int
+    top_languages: list[Language_stat]
+    repositories: list[Repo]
 
 
 
