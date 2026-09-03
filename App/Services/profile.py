@@ -26,3 +26,12 @@ def computer_portfolio(user_raw: dict,repo_raw: list[dict])-> Portfolio:
         top_languages=[Language_stat(**s) for s in stats[:5]],
         repositories=repos[:20],             # cap for a readable portfolio
     )
+
+class ProfileService:
+    def __init__(self, client):
+        self.client = client
+
+    async def get_portfolio(self, username: str) -> Portfolio:
+        user_raw = await self.client.get_user(username)
+        repos_raw = await self.client.get_repositories(username)
+        return _count_portfolio(user_raw, repos_raw)
