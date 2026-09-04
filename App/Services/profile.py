@@ -1,7 +1,7 @@
 from collections import counter 
 from App.Schemas.schema import Portfolio,GitHubUser,Repo,Language_stat
 
-def computer_portfolio(user_raw: dict,repo_raw: list[dict])-> Portfolio:
+def compute_portfolio(user_raw: dict,repo_raw: list[dict])-> Portfolio:
     Lang_count=counter(r["laguages"] for r in repo_raw if r.get("languages"))
     total=sum (Lang_count.values()) or 1
 
@@ -34,4 +34,4 @@ class ProfileService:
     async def get_portfolio(self, username: str) -> Portfolio:
         user_raw = await self.client.get_user(username)
         repos_raw = await self.client.get_repositories(username)
-        return computer_portfolio(user_raw, repos_raw)
+        return compute_portfolio(user_raw, repos_raw)
