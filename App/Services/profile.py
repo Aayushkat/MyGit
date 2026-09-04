@@ -34,4 +34,4 @@ class ProfileService:
     async def get_portfolio(self, username: str) -> Portfolio:
         user_raw = await self.client.get_user(username)
         repos_raw = await self.client.get_repositories(username)
-        return _count_portfolio(user_raw, repos_raw)
+        return computer_portfolio(user_raw, repos_raw)
