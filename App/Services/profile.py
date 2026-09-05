@@ -32,6 +32,8 @@ class ProfileService:
         self.client = client
 
     async def get_portfolio(self, username: str) -> Portfolio:
+        #get_user method is inherited by github client , it will be inherited during the routing 
         user_raw = await self.client.get_user(username)
+        #get_respositories method is inherited by github client , it will be inherited during the routing 
         repos_raw = await self.client.get_repositories(username)
         return compute_portfolio(user_raw, repos_raw)
