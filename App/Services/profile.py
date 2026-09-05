@@ -1,12 +1,29 @@
-from collections import counter 
+from collections import Counter
 from App.Schemas.schema import Portfolio,GitHubUser,Repo,Language_stat
-
+from App.Services.math_functions import _fix_rounding
 def compute_portfolio(user_raw: dict,repo_raw: list[dict])-> Portfolio:
-    Lang_count=counter(r["laguages"] for r in repo_raw if r.get("languages"))
-    total=sum (Lang_count.values()) or 1
 
+    Lang_count=Counter(r["languages"] for r in repo_raw if r.get("languages"))
+
+    
+    total=sum (Lang_count.values()) or 1
+    #stat return type is:
+    # stats
+    #     └── list
+    #         ├── dict
+    #         │    ├── name       → str
+    #         │    └── percentage → int
+    #         ├── dict
+    #         └── ...
+    # for example:
+    # [
+    # {"name": "Python", "percentage": 47},
+    # {"name": "C++", "percentage": 24},
+    # {"name": "C", "percentage": 18},
+    # {"name": "JavaScript", "percentage": 12}
+    #  ]
     stats = [{"name": l, "percentage": round(c / total * 100.0)} for l, c in Lang_count.most_common()]
-#________________________ have to write the rounding functions afterwards
+    _fix_rounding(stats) # makes them sum to 100 (see 4.3)
 
     repos = [Repo(name=r["name"],
                   stars=r.get("stargazers_count", 0),
