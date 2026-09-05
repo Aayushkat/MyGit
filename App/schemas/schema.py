@@ -21,7 +21,7 @@ class Repo(BaseModel):
     is_fork: bool =False
 
 class Language_stat(BaseModel):
-    Name:str 
+    name:str 
     percentage: int=0
 
 class Portfolio(BaseModel):
