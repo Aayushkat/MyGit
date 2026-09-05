@@ -3,12 +3,12 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
  
 from App.Routers import Health_test          #importing Healht_test.py from path App/routers 
-from App.Routers import github
+from App.Routers import github_router
 
 app=FastAPI(title="Mygit")
 #The 'router=APIrouter()' inside the the file hello.py
 app.include_router(Health_test.router)
-app.include_router(github.router)
+app.include_router(github_router.router)
 
 
 
