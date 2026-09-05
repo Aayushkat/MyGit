@@ -26,14 +26,14 @@ def compute_portfolio(user_raw: dict,repo_raw: list[dict])-> Portfolio:
         top_languages=[Language_stat(**s) for s in stats[:5]],
         repositories=repos[:20],             # cap for a readable portfolio
     )
-
+#class to fetch portoflio info from github servers and return the json in Portfolio structure
 class ProfileService:
     def __init__(self, client):
         self.client = client
 
     async def get_portfolio(self, username: str) -> Portfolio:
-        #get_user method is inherited by github client , it will be inherited during the routing 
+        #get_user method is inherited by GithubClient from App.Client.github, it will be inherited during the dependancy injection in routing process
         user_raw = await self.client.get_user(username)
-        #get_respositories method is inherited by github client , it will be inherited during the routing 
+        #get_respositories method is inherited by GtihubClient from App.Client.github , it will be inherited dependancy injection in routing process
         repos_raw = await self.client.get_repositories(username)
         return compute_portfolio(user_raw, repos_raw)
